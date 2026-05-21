@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scalecraft</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #04070F; overflow: hidden; }
+    button { font-family: 'Courier New', Courier, monospace; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CONFIG
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    const SCALE_META = {
+      atomic: { label: 'Atomic',  icon: '⚛',  scaleStr: '~1 nm',   color: '#38BDF8' },
+      nano:   { label: 'Nano',    icon: '🔬', scaleStr: '~100 nm', color: '#4ADE80' },
+      meso:   { label: 'Meso',    icon: '🔋', scaleStr: '~1 mm',   color: '#F59E0B' },
+      macro:  { label: 'Macro',   icon: '🚗', scaleStr: '~1 m',    color: '#F87171' },
+    };
+
+    const ATOMIC_ELEM = {
+      H: { color: "#38BDF8", valence: 1, label: "H", name: "Hydrogen" },
+      O: { color: "#F87171", valence: 2, label: "O", name: "Oxygen"   },
+      N: { color: "#4ADE80", valence: 3, label: "N", name: "Nitrogen" },
+    };
+
+    const NANO_ELEM = {
+      H2O: { color: "#38BDF8", valence: 2, label: "H₂O", name: "Water",    subLevelId: 'H2O' },
+      NH3: { color: "#4ADE80", valence: 3, label: "NH₃", name: "Ammonia",  subLevelId: 'NH3' },
+      Li:  { color: "#C084FC", valence: 1, label: "Li",  name: "Lithium",  subLevelId: null  },
+      C:   { color: "#94A3B8", valence: 4, label: "C",   name: "Carbon",   subLevelId: null  },
+    };
+
+    const MESO_ELEM = {
+      Elec: { color: "#38BDF8", valence: 2, label: "⚗",  name: "Electrolyte",  subLevelId: 'electrolyte' },
+      Cath: { color: "#C084FC", valence: 2, label: "⬡",  name: "Cathode Dot",  subLevelId: 'cathode'     },
+      Sep:  { color: "#94A3B8", valence: 1, label: "▦",  name: "Separator",    subLevelId: null          },
+    };
+
+    const MACRO_ELEM = {
+      Cell:    { color: "#F59E0B", valence: 4, label: "⬜", name: "Battery Cell", subLevelId: 'battery_cell' },
+      Motor:   { color: "#F87171", valence: 2, label: "⚙",  name: "Motor",        subLevelId: null },
+      Chassis: { color: "#94A3B8", valence: 3, label: "☐",  name: "Chassis",      subLevelId: null },
+    };
+
+    const DEMO_H2O = {
+      "0,1": "disp-H", "1,1": "belt-r", "2,1": "belt-r", "3,1": "belt-r",
+      "4,1": "bonder", "5,1": "belt-r", "6,1": "belt-r", "7,1": "belt-r", "8,1": "collector",
+      "0,3": "disp-O", "1,3": "belt-r", "2,3": "belt-r", "3,3": "belt-r", "4,3": "belt-u", "4,2": "belt-u",
+      "0,5": "disp-H", "1,5": "belt-r", "2,5": "belt-r", "3,5": "belt-r", "4,5": "belt-u", "4,4": "belt-u",
+    };
+
+    const DEMO_H2 = {
+      "1,1": "disp-H", "2,1": "belt-r", "3,1": "belt-r",
+      "1,3": "disp-H", "2,3": "belt-r", "3,3": "belt-r", "3,2": "belt-u",
+      "4,1": "bonder", "5,1": "belt-r", "6,1": "belt-r", "7,1": "belt-r", "8,1": "collector",
+    };
+
+    const ALL_LEVELS = [
+      // ── Atomic ──────────────────────────────────────────────────────
+      {
+        id: 'H2',  scale: 'atomic', name: 'Hydrogen Gas', formula: 'H₂',
+        ELEM: ATOMIC_ELEM, COLS: 9, ROWS: 6, CELL: 70, TICK_MS: 650, EMIT_EVERY: 5,
+        target: { H: 2 }, goal: 5, requires: [],
+        demo: DEMO_H2,
+        hint: 'Route two H atoms to the ⬡ bonder, then to ★ output.',
+      },
+      {
+        id: 'H2O', scale: 'atomic', name: 'Water', formula: 'H₂O',
+        ELEM: ATOMIC_ELEM, COLS: 9, ROWS: 6, CELL: 70, TICK_MS: 650, EMIT_EVERY: 5,
+        target: { H: 2, O: 1 }, goal: 5, requires: ['H2'],
+        demo: DEMO_H2O,
+        hint: 'O waits at the bonder until both H atoms arrive.',
+      },
+      {
+        id: 'NH3', scale: 'atomic', name: 'Ammonia', formula: 'NH₃',
+        ELEM: ATOMIC_ELEM, COLS: 9, ROWS: 6, CELL: 70, TICK_MS: 650, EMIT_EVERY: 5,
+        target: { N: 1, H: 3 }, goal: 5, requires: ['H2O'],
+        demo: null,
+        hint: 'N (valence 3) waits for all 3 H atoms.',
+      },
+      {
+        id: 'H2O2', scale: 'atomic', name: 'Peroxide', formula: 'H₂O₂',
+        ELEM: ATOMIC_ELEM, COLS: 9, ROWS: 6, CELL: 70, TICK_MS: 650, EMIT_EVERY: 5,
+        target: { H: 2, O: 2 }, goal: 5, requires: ['NH3'],
+        demo: null,
+        hint: 'O atoms must arrive before H atoms.',
+      },
+      // ── Nano ────────────────────────────────────────────────────────
+      {
+        id: 'electrolyte', scale: 'nano', name: 'Electrolyte Drop', formula: 'Elec',
+        ELEM: NANO_ELEM, COLS: 11, ROWS: 7, CELL: 60, TICK_MS: 800, EMIT_EVERY: 6,
+        target: { H2O: 2, Li: 1 }, goal: 4, requires: ['H2O'],
+        demo: null,
+        hint: 'H₂O molecules coat the Li ion. Zoom into H₂O dispensers to tune your water factory.',
+      },
+      {
+        id: 'cathode', scale: 'nano', name: 'Cathode Dot', formula: 'LFP',
+        ELEM: NANO_ELEM, COLS: 11, ROWS: 7, CELL: 60, TICK_MS: 800, EMIT_EVERY: 6,
+        target: { NH3: 2, Li: 1, C: 1 }, goal: 4, requires: ['NH3', 'electrolyte'],
+        demo: null,
+        hint: 'NH₃ ligands stabilize Li in a carbon matrix.',
+      },
+      // ── Meso ────────────────────────────────────────────────────────
+      {
+        id: 'battery_cell', scale: 'meso', name: 'Battery Cell', formula: '🔋',
+        ELEM: MESO_ELEM, COLS: 11, ROWS: 8, CELL: 56, TICK_MS: 1000, EMIT_EVERY: 7,
+        target: { Elec: 1, Cath: 2, Sep: 1 }, goal: 3, requires: ['electrolyte', 'cathode'],
+        demo: null,
+        hint: 'Layer cathode, electrolyte, and separator into a cell.',
+      },
+      // ── Macro ────────────────────────────────────────────────────────
+      {
+        id: 'electric_car', scale: 'macro', name: 'Electric Car', formula: '🚗 EV',
+        ELEM: MACRO_ELEM, COLS: 11, ROWS: 8, CELL: 64, TICK_MS: 1200, EMIT_EVERY: 8,
+        target: { Cell: 4, Motor: 1, Chassis: 1 }, goal: 2, requires: ['battery_cell'],
+        demo: null,
+        hint: 'Assemble 4 battery cells with motor and chassis.',
+      },
+    ];
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ENGINE
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    const gk = (c, r) => `${c},${r}`;
+    const fromGK = k => { const [c, r] = k.split(",").map(Number); return { c, r }; };
+    const DIRS = { r: [1, 0], l: [-1, 0], u: [0, -1], d: [0, 1] };
+    const beltDir = t => t?.startsWith("belt-") ? t.split("-")[1] : null;
+    const dispElem = t => t?.startsWith("disp-") ? t.slice(5) : null;
+
+    let _pid = 0;
+    const newId = () => `p${++_pid}`;
+
+    function tryBond(atoms, ELEM) {
+      const r = atoms.map(a => ({ ...a, bonds: [...a.bonds] }));
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let i = 0; i < r.length; i++) {
+          for (let j = i + 1; j < r.length; j++) {
+            if (r[i].bonds.includes(j)) continue;
+            if (r[i].bonds.length < (ELEM[r[i].elem]?.valence || 1) &&
+                r[j].bonds.length < (ELEM[r[j].elem]?.valence || 1)) {
+              r[i].bonds.push(j); r[j].bonds.push(i); changed = true;
+            }
+          }
+        }
+      }
+      return r;
+    }
+
+    function isComplete(p, target) {
+      const cnt = {};
+      p.atoms.forEach(a => { cnt[a.elem] = (cnt[a.elem] || 0) + 1; });
+      const tk = Object.keys(target), ck = Object.keys(cnt);
+      return ck.length === tk.length && tk.every(e => cnt[e] === target[e]);
+    }
+
+    function fmla(atoms) {
+      const cnt = {};
+      atoms.forEach(a => { cnt[a.elem] = (cnt[a.elem] || 0) + 1; });
+      return Object.entries(cnt).map(([e, n]) => `${e}${n > 1 ? n : ""}`).join("");
+    }
+
+    function stepSim(particles, tiles, tick, level) {
+      const { ELEM, target, COLS, ROWS, EMIT_EVERY } = level;
+      let next = particles.map(p => ({ ...p, atoms: p.atoms.map(a => ({ ...a, bonds: [...a.bonds] })) }));
+      let scored = 0;
+
+      if (tick % EMIT_EVERY === 0) {
+        Object.entries(tiles).forEach(([key, tile]) => {
+          const elem = dispElem(tile);
+          if (!elem) return;
+          const { c, r } = fromGK(key);
+          if (c + 1 < COLS) next.push({ id: newId(), col: c + 1, row: r, atoms: [{ elem, bonds: [] }] });
+        });
+      }
+
+      next = next.map(p => {
+        const tile = tiles[gk(p.col, p.row)];
+        if (tile === "bonder") {
+          if (!isComplete(p, target)) return p;
+          return p.col + 1 < COLS ? { ...p, col: p.col + 1 } : null;
+        }
+        const dir = beltDir(tile);
+        if (!dir) return p;
+        const [dc, dr] = DIRS[dir];
+        const nc = p.col + dc, nr = p.row + dr;
+        return (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) ? { ...p, col: nc, row: nr } : null;
+      }).filter(Boolean);
+
+      Object.entries(tiles).forEach(([key, tile]) => {
+        if (tile !== "bonder") return;
+        const { c, r } = fromGK(key);
+        const here = next.filter(p => p.col === c && p.row === r && !isComplete(p, target));
+        if (here.length < 2) return;
+        const allAtoms = [];
+        here.forEach(p => {
+          const off = allAtoms.length;
+          p.atoms.forEach(a => allAtoms.push({ ...a, bonds: a.bonds.map(b => b + off) }));
+        });
+        next = [
+          ...next.filter(p => !here.includes(p)),
+          { id: newId(), col: c, row: r, atoms: tryBond(allAtoms, ELEM) },
+        ];
+      });
+
+      Object.entries(tiles).forEach(([key, tile]) => {
+        if (tile !== "collector") return;
+        const { c, r } = fromGK(key);
+        next.filter(p => p.col === c && p.row === r && isComplete(p, target)).forEach(() => scored++);
+        next = next.filter(p => !(p.col === c && p.row === r && isComplete(p, target)));
+      });
+
+      return { next, scored };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FACTORY VIEW
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function makeTools(ELEM) {
+      const elems = Object.entries(ELEM);
+      return [
+        { id: "belt-r", icon: "→", label: "Belt →", key: "1" },
+        { id: "belt-l", icon: "←", label: "Belt ←", key: "2" },
+        { id: "belt-u", icon: "↑", label: "Belt ↑", key: "3" },
+        { id: "belt-d", icon: "↓", label: "Belt ↓", key: "4" },
+        ...elems.map(([elem, cfg], i) => ({
+          id: `disp-${elem}`, icon: cfg.label, label: `${cfg.label} Source`, key: String(5 + i),
+        })),
+        { id: "bonder",    icon: "⬡", label: "Bonder", key: String(5 + elems.length)  },
+        { id: "collector", icon: "★", label: "Output",  key: String(6 + elems.length)  },
+        { id: "eraser",    icon: "✕", label: "Erase",   key: "0" },
+      ];
+    }
+
+    function FactoryView({ level, state, onChange, onZoomInto }) {
+      const { ELEM, COLS, ROWS, CELL, TICK_MS, target, goal } = level;
+      const TOOLS = useMemo(() => makeTools(ELEM), [ELEM]);
+
+      const [tool, setTool] = useState("belt-r");
+      const tilesRef     = useRef(state.tiles);
+      const particlesRef = useRef(state.particles);
+      const tickRef      = useRef(state.tick);
+      const scoreRef     = useRef(state.score);
+      const runningRef   = useRef(state.running);
+      const wonRef       = useRef(state.won);
+      const onChangeRef  = useRef(onChange);
+      const doResetRef   = useRef(null);
+      const loadDemoRef  = useRef(null);
+
+      useEffect(() => { onChangeRef.current = onChange; });
+      useEffect(() => { tilesRef.current   = state.tiles;   }, [state.tiles]);
+      useEffect(() => { runningRef.current = state.running; }, [state.running]);
+
+      useEffect(() => {
+        particlesRef.current = state.particles;
+        tickRef.current      = state.tick;
+        scoreRef.current     = state.score;
+        wonRef.current       = state.won;
+      }, [state.particles, state.tick, state.score, state.won]);
+
+      doResetRef.current = () => {
+        particlesRef.current = []; tickRef.current = 0; scoreRef.current = 0; wonRef.current = false;
+        onChangeRef.current(f => ({ ...f, particles: [], tick: 0, score: 0, won: false, running: false }));
+      };
+
+      loadDemoRef.current = () => {
+        const demo = level.demo || {};
+        tilesRef.current = demo;
+        particlesRef.current = []; tickRef.current = 0; scoreRef.current = 0; wonRef.current = false;
+        onChangeRef.current(f => ({ ...f, tiles: demo, particles: [], tick: 0, score: 0, won: false, running: false }));
+      };
+
+      useEffect(() => {
+        if (!state.running || state.won) return;
+        const id = setInterval(() => {
+          tickRef.current++;
+          const { next, scored } = stepSim(particlesRef.current, tilesRef.current, tickRef.current, level);
+          particlesRef.current = next;
+          const newScore = scoreRef.current + scored;
+          scoreRef.current = newScore;
+          const won = newScore >= goal;
+          wonRef.current = won;
+          onChangeRef.current(f => ({
+            ...f, particles: [...next], tick: tickRef.current, score: newScore,
+            ...(won ? { won: true, running: false } : {}),
+          }));
+        }, TICK_MS);
+        return () => clearInterval(id);
+      }, [state.running, state.won, level, goal, TICK_MS]);
+
+      useEffect(() => {
+        const onKey = e => {
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+          if (e.key === ' ') { e.preventDefault(); if (!wonRef.current) onChangeRef.current(f => ({ ...f, running: !f.running })); }
+          if (e.key === 'r' || e.key === 'R') doResetRef.current();
+          if (e.key === 'd' || e.key === 'D') loadDemoRef.current();
+          const t = TOOLS.find(t => t.key === e.key);
+          if (t && !runningRef.current) setTool(t.id);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [TOOLS]);
+
+      const handleClick = useCallback(e => {
+        if (state.running) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const c = Math.floor((e.clientX - rect.left) / CELL);
+        const r = Math.floor((e.clientY - rect.top) / CELL);
+        if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
+        const key = gk(c, r);
+        const newTiles = tool === "eraser"
+          ? Object.fromEntries(Object.entries(tilesRef.current).filter(([k]) => k !== key))
+          : { ...tilesRef.current, [key]: tool };
+        tilesRef.current = newTiles;
+        onChange(f => ({ ...f, tiles: newTiles }));
+      }, [state.running, tool, COLS, ROWS, CELL, onChange]);
+
+      const handleRClick = useCallback(e => {
+        e.preventDefault();
+        if (state.running) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const c = Math.floor((e.clientX - rect.left) / CELL);
+        const r = Math.floor((e.clientY - rect.top) / CELL);
+        if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
+        const key = gk(c, r);
+        const tile = tilesRef.current[key];
+        const elem = dispElem(tile);
+        if (elem && ELEM[elem]?.subLevelId) { onZoomInto(ELEM[elem].subLevelId); return; }
+        const newTiles = Object.fromEntries(Object.entries(tilesRef.current).filter(([k]) => k !== key));
+        tilesRef.current = newTiles;
+        onChange(f => ({ ...f, tiles: newTiles }));
+      }, [state.running, ELEM, COLS, ROWS, CELL, onChange, onZoomInto]);
+
+      const W = COLS * CELL, H = ROWS * CELL;
+      const pct = Math.min(100, (state.score / goal) * 100);
+      const ANIM_MS = TICK_MS * 0.75;
+
+      function renderTile(key, tile) {
+        const { c, r } = fromGK(key);
+        const x = c * CELL, y = r * CELL, cx = x + CELL / 2, cy = y + CELL / 2;
+        const dir = beltDir(tile);
+        const elem = dispElem(tile);
+        const elemCfg = elem ? ELEM[elem] : null;
+
+        if (dir) {
+          const arr = { r: "→", l: "←", u: "↑", d: "↓" }[dir];
+          return (
+            <g key={key}>
+              <rect x={x+2} y={y+2} width={CELL-4} height={CELL-4} rx={4} fill="#06101E" stroke="#38BDF818" strokeWidth={0.5} />
+              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fill="#38BDF855" fontSize={28}>{arr}</text>
+              {state.running && (
+                <rect x={x+2} y={y+2} width={CELL-4} height={CELL-4} rx={4} fill="#38BDF8" opacity={0}>
+                  <animate attributeName="opacity" values="0;0.06;0" dur="0.8s" repeatCount="indefinite" />
+                </rect>
+              )}
+            </g>
+          );
+        }
+
+        if (elemCfg) {
+          const ec = elemCfg.color;
+          const hasSub = !!elemCfg.subLevelId;
+          return (
+            <g key={key}>
+              <rect x={x+2} y={y+2} width={CELL-4} height={CELL-4} rx={4} fill="#06101E" stroke={ec+"44"} strokeWidth={1} />
+              <circle cx={cx-8} cy={cy} r={14} fill="#04070F" stroke={ec} strokeWidth={1.5} />
+              <text x={cx-8} y={cy} textAnchor="middle" dominantBaseline="central"
+                fill={ec} fontSize={elemCfg.label.length > 2 ? 8 : 12} fontWeight={700} fontFamily="'Courier New',monospace">
+                {elemCfg.label}
+              </text>
+              <text x={cx+14} y={cy} textAnchor="middle" dominantBaseline="central" fill={ec+"77"} fontSize={15}>→</text>
+              <text x={cx} y={y+CELL-11} textAnchor="middle" fill={ec+"55"} fontSize={7} fontFamily="'Courier New',monospace">SOURCE</text>
+              {hasSub && (
+                <g style={{ cursor: 'pointer' }} onClick={ev => { ev.stopPropagation(); onZoomInto(elemCfg.subLevelId); }}>
+                  <rect x={x+CELL-20} y={y+2} width={18} height={14} rx={3} fill="#0C2444" stroke={ec+"66"} strokeWidth={1} />
+                  <text x={x+CELL-11} y={y+10} textAnchor="middle" dominantBaseline="central" fill={ec} fontSize={8}>↳</text>
+                </g>
+              )}
+              {state.running && (
+                <circle cx={cx-8} cy={cy} r={14} fill="none" stroke={ec} strokeWidth={0.8}>
+                  <animate attributeName="r" values="11;20;11" dur="2.2s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.5;0;0.5" dur="2.2s" repeatCount="indefinite" />
+                </circle>
+              )}
+            </g>
+          );
+        }
+
+        if (tile === "bonder") {
+          const waiting = state.particles.filter(p => p.col === c && p.row === r && !isComplete(p, target)).length;
+          return (
+            <g key={key}>
+              <rect x={x+2} y={y+2} width={CELL-4} height={CELL-4} rx={4} fill="#071D2E" stroke="#38BDF844" strokeWidth={1} />
+              <text x={cx} y={cy-2} textAnchor="middle" dominantBaseline="central" fill="#38BDF8" fontSize={24}>⬡</text>
+              <text x={cx} y={y+CELL-11} textAnchor="middle" fill="#38BDF855" fontSize={7} fontFamily="'Courier New',monospace">BONDER</text>
+              {waiting > 0 && (
+                <g>
+                  <circle cx={x+CELL-13} cy={y+13} r={9} fill="#F59E0B" />
+                  <text x={x+CELL-13} y={y+13} textAnchor="middle" dominantBaseline="central" fill="#04070F" fontSize={9} fontWeight={700} fontFamily="'Courier New',monospace">{waiting}</text>
+                </g>
+              )}
+              {state.running && (
+                <rect x={x+2} y={y+2} width={CELL-4} height={CELL-4} rx={4} fill="#38BDF8" opacity={0}>
+                  <animate attributeName="opacity" values="0;0.1;0" dur="1s" repeatCount="indefinite" />
+                </rect>
+              )}
+            </g>
+          );
+        }
+
+        if (tile === "collector") {
+          return (
+            <g key={key}>
+              <rect x={x+2} y={y+2} width={CELL-4} height={CELL-4} rx={4} fill="#071E07" stroke="#4ADE8044" strokeWidth={1} />
+              <text x={cx} y={cy-2} textAnchor="middle" dominantBaseline="central" fill="#4ADE80" fontSize={24}>★</text>
+              <text x={cx} y={y+CELL-11} textAnchor="middle" fill="#4ADE8055" fontSize={7} fontFamily="'Courier New',monospace">OUTPUT</text>
+            </g>
+          );
+        }
+        return null;
+      }
+
+      function renderParticle(p) {
+        const x = p.col * CELL + CELL / 2, y = p.row * CELL + CELL / 2;
+        const complete = isComplete(p, target);
+        if (p.atoms.length === 1) {
+          const ec = ELEM[p.atoms[0].elem]?.color || "#fff";
+          return (
+            <g key={p.id} style={{ transform: `translate(${x}px,${y}px)`, transition: `transform ${ANIM_MS}ms ease` }}>
+              <circle cx={0} cy={0} r={15} fill="#04070F" stroke={ec} strokeWidth={2} />
+              <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill={ec} fontSize={11} fontWeight={700} fontFamily="'Courier New',monospace">
+                {ELEM[p.atoms[0].elem]?.label || p.atoms[0].elem}
+              </text>
+            </g>
+          );
+        }
+        const f = fmla(p.atoms);
+        const color = complete ? "#4ADE80" : "#F59E0B";
+        const pw = f.length * 7 + 22;
+        return (
+          <g key={p.id} style={{ transform: `translate(${x}px,${y}px)`, transition: `transform ${ANIM_MS}ms ease` }}>
+            {complete && <rect x={-pw/2} y={-11} width={pw} height={22} rx={11} fill={color} opacity={0.15} />}
+            <rect x={-pw/2} y={-11} width={pw} height={22} rx={11} fill="#04070F" stroke={color} strokeWidth={complete ? 2 : 1.5} />
+            <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill={color} fontSize={10} fontWeight={700} fontFamily="'Courier New',monospace">{f}</text>
+          </g>
+        );
+      }
+
+      return (
+        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div>
+              <svg width={W} height={H}
+                style={{
+                  background: "#060B18", border: `1px solid ${state.won ? "#4ADE8055" : "#0C1E35"}`,
+                  borderRadius: 10, display: "block", cursor: state.running ? "default" : "crosshair",
+                  boxShadow: state.won ? "0 0 40px #4ADE8010" : "none", transition: "box-shadow 0.5s",
+                }}
+                onClick={handleClick} onContextMenu={handleRClick}
+              >
+                {Array.from({ length: ROWS }, (_, r) =>
+                  Array.from({ length: COLS }, (_, c) => (
+                    <g key={gk(c, r)}>
+                      <rect x={c*CELL} y={r*CELL} width={CELL} height={CELL} fill="none" stroke="#0C1E35" strokeWidth={0.5} opacity={0.5} />
+                      <circle cx={c*CELL+CELL/2} cy={r*CELL+CELL/2} r={1.5} fill="#0C2444" opacity={0.5} />
+                    </g>
+                  ))
+                )}
+                {Object.entries(state.tiles).map(([k, t]) => renderTile(k, t))}
+                {state.particles.map(renderParticle)}
+                {state.won && (
+                  <g>
+                    <rect x={0} y={0} width={W} height={H} fill="#000" opacity={0.65} />
+                    <rect x={W/2-185} y={H/2-62} width={370} height={124} rx={12} fill="#04070F" stroke="#4ADE80" strokeWidth={1.5} />
+                    <text x={W/2} y={H/2-18} textAnchor="middle" fill="#4ADE80" fontSize={24} fontWeight={700} fontFamily="'Courier New',monospace">★ FACTORY COMPLETE</text>
+                    <text x={W/2} y={H/2+14} textAnchor="middle" fill="#38BDF8" fontSize={12} fontFamily="'Courier New',monospace">{goal}× {level.formula} synthesized</text>
+                    <text x={W/2} y={H/2+38} textAnchor="middle" fill="#1B3658" fontSize={9} fontFamily="'Courier New',monospace">PRESS R TO PLAY AGAIN · CLICK NEXT LEVEL</text>
+                  </g>
+                )}
+              </svg>
+              <div style={{ marginTop: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#1B3658", marginBottom: 4 }}>
+                  <span>PRODUCED</span>
+                  <span style={{ color: state.score >= goal ? "#4ADE80" : "#38BDF8" }}>{state.score} / {goal}</span>
+                </div>
+                <div style={{ height: 3, background: "#0C1E35", borderRadius: 2 }}>
+                  <div style={{ height: "100%", borderRadius: 2, transition: "width 0.4s", background: state.score >= goal ? "#4ADE80" : "#38BDF8", width: `${pct}%` }} />
+                </div>
+              </div>
+              {!state.running && !state.won && (
+                <div style={{ marginTop: 6, fontSize: 9, color: "#1B3658", letterSpacing: 1.5, textAlign: "center" }}>
+                  CLICK PLACE · RIGHT-CLICK ERASE/ZOOM · SPACE RUN · D DEMO
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ width: 168, background: "#060B18", borderLeft: "1px solid #0C1E35", padding: 12, display: "flex", flexDirection: "column", gap: 3, overflowY: "auto" }}>
+            <div style={{ fontSize: 9, color: "#1B3658", letterSpacing: 4, textTransform: "uppercase", marginBottom: 4 }}>Build</div>
+            {TOOLS.map(t => {
+              const isAct = tool === t.id && !state.running;
+              const elemKey = t.id.startsWith("disp-") ? t.id.slice(5) : null;
+              const ec = elemKey ? (ELEM[elemKey]?.color || "#38BDF8") : t.id === "collector" ? "#4ADE80" : "#38BDF8";
+              return (
+                <div key={t.id} onClick={() => { if (!state.running) setTool(t.id); }}
+                  style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 7px", borderRadius: 5,
+                    border: `1px solid ${isAct ? ec : "#0C1E35"}`, background: isAct ? ec + "12" : "transparent",
+                    cursor: state.running ? "default" : "pointer", opacity: state.running ? 0.5 : 1, transition: "all 0.12s" }}>
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#04070F",
+                    border: `1.5px solid ${isAct ? ec : "#0C1E35"}`, display: "flex", alignItems: "center",
+                    justifyContent: "center", fontSize: 10, fontWeight: 700, color: isAct ? ec : "#1B3658", flexShrink: 0 }}>
+                    {t.icon}
+                  </div>
+                  <span style={{ fontSize: 10, color: isAct ? ec : "#1B3658", flex: 1 }}>{t.label}</span>
+                  <span style={{ fontSize: 8, color: "#0C2444", flexShrink: 0 }}>{t.key}</span>
+                </div>
+              );
+            })}
+            <div style={{ height: 1, background: "#0C1E35", margin: "6px 0" }} />
+            <div style={{ fontSize: 9, color: "#1B3658", lineHeight: 1.9 }}>{level.hint}</div>
+            {state.running && (
+              <div style={{ marginTop: "auto", padding: "6px 8px", background: "#04070F", border: "1px solid #0C1E35",
+                borderRadius: 5, fontSize: 9, color: "#0C2444", textAlign: "center", letterSpacing: 1 }}>
+                TICK {state.tick}
+                <div style={{ marginTop: 2, fontSize: 8 }}>{state.particles.length} in flight</div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BREADCRUMB
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function Breadcrumb({ viewStack, onNavigate, onZoomOut }) {
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 18px",
+          borderBottom: "1px solid #0C1E35", background: "#04070F", fontSize: 10, color: "#1B3658", flexWrap: "wrap" }}>
+          {viewStack.map((levelId, idx) => {
+            const lv = ALL_LEVELS.find(l => l.id === levelId);
+            const sm = SCALE_META[lv?.scale];
+            const isLast = idx === viewStack.length - 1;
+            return (
+              <span key={levelId} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                {idx > 0 && <span style={{ color: "#0C2444", margin: "0 2px" }}>›</span>}
+                <button onClick={() => !isLast && onNavigate(idx)} style={{
+                  background: isLast ? (sm?.color || "#38BDF8") + "15" : "transparent",
+                  border: "none", cursor: isLast ? "default" : "pointer",
+                  fontFamily: "'Courier New',monospace", fontSize: 10, letterSpacing: 1,
+                  color: isLast ? (sm?.color || "#38BDF8") : "#1B3658", padding: "2px 6px", borderRadius: 3,
+                }}>{sm?.icon} {lv?.name || levelId}</button>
+              </span>
+            );
+          })}
+          {viewStack.length > 1 && (
+            <button onClick={onZoomOut} style={{
+              marginLeft: "auto", background: "transparent", border: "1px solid #0C2444", borderRadius: 3,
+              fontFamily: "'Courier New',monospace", fontSize: 9, color: "#1B3658", padding: "3px 10px", cursor: "pointer", letterSpacing: 1,
+            }}>↑ ZOOM OUT</button>
+          )}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // LEVEL TREE
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function LevelTree({ unlockedIds, completed, currentId, onSelect, onClose }) {
+      const scaleOrder = ['atomic', 'nano', 'meso', 'macro'];
+      return (
+        <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={onClose}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "#060B18", border: "1px solid #0C1E35", borderRadius: 12, padding: "24px 28px",
+            minWidth: 380, maxWidth: 480, fontFamily: "'Courier New',monospace", color: "#7BA3C4",
+            maxHeight: "90vh", overflowY: "auto",
+          }}>
+            <div style={{ fontSize: 9, letterSpacing: 5, color: "#1B3658", marginBottom: 16, textTransform: "uppercase" }}>◈ Scalecraft — Select Level</div>
+            {scaleOrder.map(scaleId => {
+              const sm = SCALE_META[scaleId];
+              const levels = ALL_LEVELS.filter(l => l.scale === scaleId);
+              return (
+                <div key={scaleId} style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 9, color: sm.color, letterSpacing: 3, marginBottom: 8, textTransform: "uppercase" }}>
+                    {sm.icon} {sm.label} Scale — {sm.scaleStr}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {levels.map(lv => {
+                      const unlocked = unlockedIds.includes(lv.id);
+                      const done = completed.has(lv.id);
+                      const isCurrent = lv.id === currentId;
+                      return (
+                        <div key={lv.id} onClick={() => unlocked && onSelect(lv.id)}
+                          style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", borderRadius: 6,
+                            border: `1px solid ${isCurrent ? sm.color : done ? sm.color + "44" : "#0C1E35"}`,
+                            background: isCurrent ? sm.color + "18" : "transparent",
+                            opacity: unlocked ? 1 : 0.35, cursor: unlocked ? "pointer" : "default", transition: "all 0.12s" }}>
+                          <span style={{ fontSize: 14 }}>{done ? "✓" : unlocked ? "○" : "🔒"}</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, color: isCurrent ? sm.color : unlocked ? "#7BA3C4" : "#1B3658", fontWeight: isCurrent ? 700 : 400 }}>
+                              {lv.formula} — {lv.name}
+                            </div>
+                            {!unlocked && (
+                              <div style={{ fontSize: 9, color: "#0C2444", marginTop: 2 }}>
+                                Complete: {lv.requires.map(r => ALL_LEVELS.find(l => l.id === r)?.name).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                          {done && <span style={{ fontSize: 9, color: sm.color + "88" }}>DONE</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            <button onClick={onClose} style={{ marginTop: 8, width: "100%", padding: "8px", background: "transparent",
+              border: "1px solid #0C1E35", borderRadius: 6, fontFamily: "'Courier New',monospace",
+              fontSize: 10, color: "#1B3658", cursor: "pointer", letterSpacing: 2 }}>CLOSE</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GAME CONTAINER
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function initFactory(levelId) {
+      const lv = ALL_LEVELS.find(l => l.id === levelId);
+      return { tiles: lv?.demo || {}, particles: [], score: 0, tick: 0, running: false, won: false };
+    }
+
+    function Scalecraft() {
+      const [viewStack,     setViewStack]     = useState(['H2']);
+      const [factoryStates, setFactoryStates] = useState(() => ({ H2: initFactory('H2') }));
+      const [completed,     setCompleted]     = useState(new Set());
+      const [showLevels,    setShowLevels]    = useState(false);
+
+      const currentId    = viewStack[viewStack.length - 1];
+      const currentLevel = ALL_LEVELS.find(l => l.id === currentId);
+      const currentState = factoryStates[currentId] || initFactory(currentId);
+
+      const unlockedIds = useMemo(() =>
+        ALL_LEVELS.filter(l => l.requires.every(r => completed.has(r))).map(l => l.id),
+        [completed]
+      );
+
+      useEffect(() => {
+        if (currentState.won && !completed.has(currentId))
+          setCompleted(c => new Set([...c, currentId]));
+      }, [currentState.won, currentId]);
+
+      function updateFactory(id, updater) {
+        setFactoryStates(prev => ({ ...prev, [id]: updater(prev[id] || initFactory(id)) }));
+      }
+
+      const handleChange = useCallback(updater => {
+        setFactoryStates(prev => ({ ...prev, [currentId]: updater(prev[currentId] || initFactory(currentId)) }));
+      }, [currentId]);
+
+      function zoomInto(subLevelId) {
+        updateFactory(currentId, f => ({ ...f, running: false }));
+        setFactoryStates(prev => prev[subLevelId] ? prev : { ...prev, [subLevelId]: initFactory(subLevelId) });
+        setViewStack(v => [...v, subLevelId]);
+      }
+
+      function zoomOut() {
+        if (viewStack.length > 1) setViewStack(v => v.slice(0, -1));
+      }
+
+      function navigateTo(levelId) {
+        setFactoryStates(prev => prev[levelId] ? prev : { ...prev, [levelId]: initFactory(levelId) });
+        setViewStack([levelId]);
+        setShowLevels(false);
+      }
+
+      const sm = SCALE_META[currentLevel?.scale] || SCALE_META.atomic;
+
+      return (
+        <div style={{ background: "#04070F", height: "100vh", fontFamily: "'Courier New', Courier, monospace", color: "#7BA3C4", display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", padding: "10px 18px", borderBottom: "1px solid #0C1E35", background: "#060B18", gap: 16, flexShrink: 0 }}>
+            <div>
+              <div style={{ fontSize: 9, color: "#1B3658", letterSpacing: 5, textTransform: "uppercase" }}>◈ Scalecraft</div>
+              <div style={{ fontSize: 18, color: "#E0F7FA", fontWeight: 700, letterSpacing: 1 }}>
+                {sm.icon} {currentLevel?.name} — {sm.scaleStr}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
+              <button onClick={() => setShowLevels(true)} style={{ padding: "6px 12px", fontSize: 9, cursor: "pointer", background: "transparent", border: "1px solid #0C2444", borderRadius: 4, color: "#1B3658", letterSpacing: 2 }}>☰ LEVELS</button>
+              {currentLevel?.demo && (
+                <button onClick={() => updateFactory(currentId, f => ({ ...f, tiles: currentLevel.demo, particles: [], score: 0, tick: 0, won: false, running: false }))}
+                  style={{ padding: "6px 12px", fontSize: 9, cursor: "pointer", background: "transparent", border: "1px solid #0C2444", borderRadius: 4, color: "#1B3658", letterSpacing: 2 }}>DEMO</button>
+              )}
+              <button onClick={() => updateFactory(currentId, f => ({ ...f, running: f.won ? f.running : !f.running }))}
+                style={{ padding: "8px 18px", fontSize: 11, cursor: currentState.won ? "default" : "pointer",
+                  background: currentState.running ? "#1A0808" : "#091C38",
+                  border: `1px solid ${currentState.running ? "#F87171" : "#38BDF8"}`,
+                  borderRadius: 4, color: currentState.running ? "#F87171" : "#38BDF8", letterSpacing: 2, fontWeight: 700 }}>
+                {currentState.running ? "⏸ PAUSE" : "▶ RUN"}
+              </button>
+              <button onClick={() => updateFactory(currentId, f => ({ ...f, particles: [], score: 0, tick: 0, won: false, running: false }))}
+                style={{ padding: "8px 10px", fontSize: 11, cursor: "pointer", background: "transparent", border: "1px solid #0C1E35", borderRadius: 4, color: "#1B3658" }}>↺</button>
+            </div>
+          </div>
+
+          <Breadcrumb viewStack={viewStack} onNavigate={idx => setViewStack(viewStack.slice(0, idx + 1))} onZoomOut={zoomOut} />
+
+          <FactoryView key={currentId} level={currentLevel} state={currentState} onChange={handleChange} onZoomInto={zoomInto} />
+
+          {showLevels && <LevelTree unlockedIds={unlockedIds} completed={completed} currentId={currentId} onSelect={navigateTo} onClose={() => setShowLevels(false)} />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Scalecraft />);
+  </script>
+</body>
+</html>
