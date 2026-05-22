@@ -320,8 +320,8 @@
       const handleClick = useCallback(e => {
         if (state.running) return;
         const rect = e.currentTarget.getBoundingClientRect();
-        const c = Math.floor((e.clientX - rect.left) / CELL);
-        const r = Math.floor((e.clientY - rect.top) / CELL);
+        const c = Math.floor((e.clientX - rect.left) * COLS / rect.width);
+        const r = Math.floor((e.clientY - rect.top) * ROWS / rect.height);
         if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
         const key = gk(c, r);
         const newTiles = tool === "eraser"
@@ -329,14 +329,14 @@
           : { ...tilesRef.current, [key]: tool };
         tilesRef.current = newTiles;
         onChange(f => ({ ...f, tiles: newTiles }));
-      }, [state.running, tool, COLS, ROWS, CELL, onChange]);
+      }, [state.running, tool, COLS, ROWS, onChange]);
 
       const handleRClick = useCallback(e => {
         e.preventDefault();
         if (state.running) return;
         const rect = e.currentTarget.getBoundingClientRect();
-        const c = Math.floor((e.clientX - rect.left) / CELL);
-        const r = Math.floor((e.clientY - rect.top) / CELL);
+        const c = Math.floor((e.clientX - rect.left) * COLS / rect.width);
+        const r = Math.floor((e.clientY - rect.top) * ROWS / rect.height);
         if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
         const key = gk(c, r);
         const tile = tilesRef.current[key];
@@ -345,11 +345,17 @@
         const newTiles = Object.fromEntries(Object.entries(tilesRef.current).filter(([k]) => k !== key));
         tilesRef.current = newTiles;
         onChange(f => ({ ...f, tiles: newTiles }));
-      }, [state.running, ELEM, COLS, ROWS, CELL, onChange, onZoomInto]);
+      }, [state.running, ELEM, COLS, ROWS, onChange, onZoomInto]);
 
       const W = COLS * CELL, H = ROWS * CELL;
       const pct = Math.min(100, (state.score / goal) * 100);
       const ANIM_MS = TICK_MS * 0.75;
+      // Scale board to fill available space (sidebar 168px, header ~52px, breadcrumb ~32px, bottom ~56px)
+      const scale = useMemo(() => {
+        const aw = window.innerWidth - 168 - 32;
+        const ah = window.innerHeight - 52 - 32 - 56;
+        return Math.min(aw / W, ah / H, 3);
+      }, [W, H]);
 
       function renderTile(key, tile) {
         const { c, r } = fromGK(key);
@@ -464,7 +470,8 @@
 
       return (
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+            <div style={{ transform: `scale(${scale})`, transformOrigin: "center center" }}>
             <div>
               <svg width={W} height={H}
                 style={{
@@ -508,6 +515,7 @@
                   CLICK PLACE · RIGHT-CLICK ERASE/ZOOM · SPACE RUN · D DEMO
                 </div>
               )}
+            </div>
             </div>
           </div>
 
